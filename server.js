@@ -56,6 +56,9 @@ app.post("/webhook", async (req, res) => {
     const analysis = message.analysis || {};
     const call = message.call || {};
 
+    // DEBUG: log the raw analysis object so we can see Vapi's actual field names
+    console.log("Raw analysis object:", JSON.stringify(analysis, null, 2));
+
     // Try a few likely places Vapi puts the caller's name (varies by setup)
     const name =
       analysis.structuredData?.name ||
