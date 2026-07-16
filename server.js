@@ -62,17 +62,18 @@ app.post("/webhook", async (req, res) => {
       customer.name ||
       "Unknown";
 
-    const phone = customer.number || "Unknown";
+    const phone = analysis.structuredData?.phone || customer.number || "Unknown";
 
     const email =
       analysis.structuredData?.email ||
       "Unknown";
 
+    const reason = analysis.structuredData?.reason || "Unknown";
+
     const summary = message.summary || analysis.summary || "No summary";
 
-    const timestamp = new Date().toISOString();
-
-    const row = [timestamp, name, phone, email, summary];
+    // Row order matches sheet headers: name | phone | email | reason for call | call summary
+    const row = [name, phone, email, reason, summary];
 
     await sheets.spreadsheets.values.append({
       spreadsheetId: SPREADSHEET_ID,
