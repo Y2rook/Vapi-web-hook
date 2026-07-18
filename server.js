@@ -32,10 +32,15 @@ if (process.env.GOOGLE_CREDENTIALS_BASE64) {
 
 const auth = new google.auth.GoogleAuth({
   credentials,
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  scopes: [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/calendar",
+  ],
 });
 
 const sheets = google.sheets({ version: "v4", auth });
+const calendar = google.calendar({ version: "v3", auth });
+const CALENDAR_ID = process.env.CALENDAR_ID;
 
 // Simple health check so you can confirm the server is alive in a browser
 app.get("/", (req, res) => {
@@ -97,4 +102,111 @@ app.post("/webhook", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
+
+// ---------------------------------------------------------------
+// Vapi Tool: check_availability
+// Vapi calls this mid-conversation to see what times are free on a given date.
+// Expects: { "message": { "toolCalls": [{ "id": "...", "function": { "arguments": { "date": "2026-07-20" } } }] } }
+// ---------------------------------------------------------------
+app.post("/api/check-availability", async (req, res) => {
+  try {
+    const toolCall = req.body.message?.toolCalls?.[0];
+    const args = toolCall?.function?.arguments || {};
+    const date = args.date; // expected format: "YYYY-MM-DD"
+
+    if (!date) {
+      return res.status(200).json({
+        results: [{ toolCallId: toolCall?.id, result: "No date provided." }],
+      });
+    }
+
+    // Business hours: 9am - 5pm, 1-hour slots. Adjust to fit the real business.
+    const dayStart = new Date(`${date}T09:00:00`);
+    const dayEnd = new Date(`${date}T17:00:00`);
+
+    const busy = await calendar.freebusy.query({
+      requestBody: {
+        timeMin: dayStart.toISOString(),
+        timeMax: dayEnd.toISOString(),
+        items: [{ id: CALENDAR_ID }],
+      },
+    });
+
+    const busySlots = busy.data.calendars[CALENDAR_ID].busy || [];
+
+    const freeSlots = [];
+    let slot = new Date(dayStart);
+    while (slot < dayEnd) {
+      const slotEnd = new Date(slot.getTime() + 60 * 60 * 1000);
+      const overlaps = busySlots.some((b) => {
+        const bStart = new Date(b.start);
+        const bEnd = new Date(b.end);
+        return slot < bEnd && slotEnd > bStart;
+      });
+      if (!overlaps) {
+        freeSlots.push(
+          slot.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+        );
+      }
+      slot = slotEnd;
+    }
+
+    const resultText =
+      freeSlots.length > 0
+        ? `Available times on ${date}: ${freeSlots.join(", ")}`
+        : `No availability on ${date}.`;
+
+    res.status(200).json({
+      results: [{ toolCallId: toolCall?.id, result: resultText }],
+    });
+  } catch (err) {
+    console.error("Error checking availability:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ---------------------------------------------------------------
+// Vapi Tool: book_appointment
+// Vapi calls this once the caller confirms a specific date/time.
+// Expects arguments: { date: "2026-07-20", time: "14:00", name: "...", reason: "..." }
+// ---------------------------------------------------------------
+app.post("/api/book-appointment", async (req, res) => {
+  try {
+    const toolCall = req.body.message?.toolCalls?.[0];
+    const args = toolCall?.function?.arguments || {};
+    const { date, time, name, reason } = args;
+
+    if (!date || !time) {
+      return res.status(200).json({
+        results: [{ toolCallId: toolCall?.id, result: "Missing date or time." }],
+      });
+    }
+
+    const startTime = new Date(`${date}T${time}:00`);
+    const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
+
+    await calendar.events.insert({
+      calendarId: CALENDAR_ID,
+      requestBody: {
+        summary: `Appointment - ${name || "Unknown caller"}`,
+        description: reason || "Booked via Sophie (AI receptionist)",
+        start: { dateTime: startTime.toISOString() },
+        end: { dateTime: endTime.toISOString() },
+      },
+    });
+
+    res.status(200).json({
+      results: [
+        {
+          toolCallId: toolCall?.id,
+          result: `Booked for ${date} at ${time}.`,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error("Error booking appointment:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+I’m
 
