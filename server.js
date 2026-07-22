@@ -208,5 +208,3 @@ app.post("/api/book-appointment", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-I’m
-
