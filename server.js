@@ -176,6 +176,9 @@ app.post("/api/book-appointment", async (req, res) => {
     const args = toolCall?.function?.arguments || {};
     const { date, time, name, reason } = args;
 
+    // DEBUG: log exactly what Vapi sent us
+    console.log("Book appointment args:", JSON.stringify(args, null, 2));
+
     if (!date || !time) {
       return res.status(200).json({
         results: [{ toolCallId: toolCall?.id, result: "Missing date or time." }],
@@ -185,15 +188,18 @@ app.post("/api/book-appointment", async (req, res) => {
     const startTime = new Date(`${date}T${time}:00`);
     const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
 
-    await calendar.events.insert({
+    const created = await calendar.events.insert({
       calendarId: CALENDAR_ID,
       requestBody: {
         summary: `Appointment - ${name || "Unknown caller"}`,
         description: reason || "Booked via Sophie (AI receptionist)",
-        start: { dateTime: startTime.toISOString() },
-        end: { dateTime: endTime.toISOString() },
+        start: { dateTime: startTime.toISOString(), timeZone: "Europe/London" },
+        end: { dateTime: endTime.toISOString(), timeZone: "Europe/London" },
       },
     });
+
+    // DEBUG: log the created event link so we can verify it actually landed
+    console.log("Event created:", created.data.htmlLink);
 
     res.status(200).json({
       results: [
