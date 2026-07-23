@@ -120,9 +120,11 @@ app.post("/api/check-availability", async (req, res) => {
       });
     }
 
-    // Business hours: 9am - 5pm, 1-hour slots. Adjust to fit the real business.
-    const dayStart = new Date(`${date}T09:00:00`);
-    const dayEnd = new Date(`${date}T17:00:00`);
+    // Business hours: 9am - 5pm UK time, 1-hour slots. Adjust to fit the real business.
+    // NOTE: +01:00 assumes British Summer Time (UK clocks). During UK winter time
+    // (GMT, late Oct - late Mar) this should be changed to +00:00.
+    const dayStart = new Date(`${date}T09:00:00+01:00`);
+    const dayEnd = new Date(`${date}T17:00:00+01:00`);
 
     const busy = await calendar.freebusy.query({
       requestBody: {
@@ -145,7 +147,11 @@ app.post("/api/check-availability", async (req, res) => {
       });
       if (!overlaps) {
         freeSlots.push(
-          slot.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+          slot.toLocaleTimeString("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "Europe/London",
+          })
         );
       }
       slot = slotEnd;
@@ -185,7 +191,9 @@ app.post("/api/book-appointment", async (req, res) => {
       });
     }
 
-    const startTime = new Date(`${date}T${time}:00`);
+    // NOTE: +01:00 assumes British Summer Time (UK clocks). During UK winter time
+    // (GMT, late Oct - late Mar) this should be changed to +00:00.
+    const startTime = new Date(`${date}T${time}:00+01:00`);
     const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
 
     const created = await calendar.events.insert({
