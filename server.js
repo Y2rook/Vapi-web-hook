@@ -41,6 +41,43 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: "v4", auth });
 const calendar = google.calendar({ version: "v3", auth });
 const CALENDAR_ID = (process.env.CALENDAR_ID || "").trim();
+const HUBSPOT_TOKEN = (process.env.HUBSPOT_ACCESS_TOKEN || "").trim();
+
+// Creates (or updates, if the email already exists) a HubSpot contact for this caller.
+async function createHubspotContact({ name, phone, email, reason, summary }) {
+  if (!HUBSPOT_TOKEN) {
+    console.log("Skipping HubSpot: no HUBSPOT_ACCESS_TOKEN set");
+    return;
+  }
+
+  const [firstname, ...rest] = (name || "Unknown").split(" ");
+  const lastname = rest.join(" ") || "-";
+
+  const response = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${HUBSPOT_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      properties: {
+        firstname,
+        lastname,
+        phone: phone !== "Unknown" ? phone : undefined,
+        email: email !== "Unknown" ? email : undefined,
+        message: `Reason: ${reason}\n\nCall summary: ${summary}`,
+      },
+    }),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error("HubSpot error:", JSON.stringify(data));
+  } else {
+    console.log("HubSpot contact created:", data.id);
+  }
+}
 
 // Simple health check so you can confirm the server is alive in a browser
 app.get("/", (req, res) => {
@@ -92,6 +129,14 @@ app.post("/webhook", async (req, res) => {
     });
 
     console.log("Row added:", row);
+
+    // Also create a HubSpot contact for this caller (safe to fail without breaking the webhook)
+    try {
+      await createHubspotContact({ name, phone, email, reason, summary });
+    } catch (hubspotErr) {
+      console.error("HubSpot contact creation failed:", hubspotErr);
+    }
+
     res.status(200).send("OK");
   } catch (err) {
     console.error("Error handling webhook:", err);
