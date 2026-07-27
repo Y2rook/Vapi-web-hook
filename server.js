@@ -79,8 +79,47 @@ async function createHubspotContact({ name, phone, email, reason, summary }) {
 
   if (!response.ok) {
     console.error("HubSpot error:", JSON.stringify(data));
-  } else {
-    console.log("HubSpot contact created:", data.id);
+    return;
+  }
+
+  console.log("HubSpot contact created:", data.id);
+
+  // Add a Note so the reason/summary is visible in the contact's activity feed
+  // (properties like "message" often aren't shown by default, but Notes always are).
+  try {
+    const noteResponse = await fetch("https://api.hubapi.com/crm/v3/objects/notes", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${HUBSPOT_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        properties: {
+          hs_note_body: `Reason for call: ${reason}\n\nCall summary: ${summary}`,
+          hs_timestamp: Date.now(),
+        },
+        associations: [
+          {
+            to: { id: data.id },
+            types: [
+              {
+                associationCategory: "HUBSPOT_DEFINED",
+                associationTypeId: 202, // note-to-contact association
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const noteData = await noteResponse.json();
+    if (!noteResponse.ok) {
+      console.error("HubSpot note error:", JSON.stringify(noteData));
+    } else {
+      console.log("HubSpot note added:", noteData.id);
+    }
+  } catch (noteErr) {
+    console.error("HubSpot note request failed:", noteErr);
   }
 }
 
