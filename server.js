@@ -43,6 +43,11 @@ const calendar = google.calendar({ version: "v3", auth });
 const CALENDAR_ID = (process.env.CALENDAR_ID || "").trim();
 const HUBSPOT_TOKEN = (process.env.HUBSPOT_ACCESS_TOKEN || "").trim();
 
+// Remembers the name/phone/reason collected during book_appointment for each call,
+// so the final end-of-call-report can use it (Vapi's structured-data output doesn't
+// reliably show up on that webhook, but the tool-call arguments do).
+const bookingsByCallId = new Map();
+
 // Creates (or updates, if the email already exists) a HubSpot contact for this caller.
 async function createHubspotContact({ name, phone, email, reason, summary }) {
   if (!HUBSPOT_TOKEN) {
@@ -97,25 +102,37 @@ app.post("/webhook", async (req, res) => {
     const customer = message.customer || {};
     const analysis = message.analysis || {};
     const call = message.call || {};
+    const callId = call.id;
+    const stored = bookingsByCallId.get(callId) || {};
 
     // DEBUG: log the raw analysis object so we can see Vapi's actual field names
     console.log("Raw analysis object:", JSON.stringify(analysis, null, 2));
+    console.log("Stored booking data for this call:", JSON.stringify(stored, null, 2));
 
     // Try a few likely places Vapi puts the caller's name (varies by setup)
     const name =
       analysis.structuredData?.name ||
+      stored.name ||
       customer.name ||
       "Unknown";
 
-    const phone = analysis.structuredData?.phone || customer.number || "Unknown";
+    const phone =
+      analysis.structuredData?.phone ||
+      stored.phone ||
+      customer.number ||
+      "Unknown";
 
     const email =
       analysis.structuredData?.email ||
+      stored.email ||
       "Unknown";
 
-    const reason = analysis.structuredData?.reason || "Unknown";
+    const reason = analysis.structuredData?.reason || stored.reason || "Unknown";
 
     const summary = message.summary || analysis.summary || "No summary";
+
+    // Clean up so this map doesn't grow forever
+    bookingsByCallId.delete(callId);
 
     // Row order matches sheet headers: name | phone | email | reason for call | call summary
     const row = [name, phone, email, reason, summary];
@@ -225,7 +242,9 @@ app.post("/api/book-appointment", async (req, res) => {
   try {
     const toolCall = req.body.message?.toolCalls?.[0];
     const args = toolCall?.function?.arguments || {};
-    const { date, time, name, reason } = args;
+    const { date, time, name, reason, email } = args;
+    const callId = req.body.message?.call?.id;
+    const customerPhone = req.body.message?.call?.customer?.number;
 
     // DEBUG: log exactly what Vapi sent us
     console.log("Book appointment args:", JSON.stringify(args, null, 2));
@@ -233,6 +252,16 @@ app.post("/api/book-appointment", async (req, res) => {
     if (!date || !time) {
       return res.status(200).json({
         results: [{ toolCallId: toolCall?.id, result: "Missing date or time." }],
+      });
+    }
+
+    // Remember these details so the end-of-call webhook can use them later
+    if (callId) {
+      bookingsByCallId.set(callId, {
+        name,
+        reason,
+        email,
+        phone: customerPhone,
       });
     }
 
