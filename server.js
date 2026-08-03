@@ -248,9 +248,10 @@ app.post("/api/check-availability", async (req, res) => {
       });
       if (!overlaps) {
         freeSlots.push(
-          slot.toLocaleTimeString("en-GB", {
-            hour: "2-digit",
+          slot.toLocaleTimeString("en-US", {
+            hour: "numeric",
             minute: "2-digit",
+            hour12: true,
             timeZone: "Europe/London",
           })
         );
