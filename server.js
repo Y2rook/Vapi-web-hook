@@ -42,6 +42,48 @@ const sheets = google.sheets({ version: "v4", auth });
 const calendar = google.calendar({ version: "v3", auth });
 const CALENDAR_ID = (process.env.CALENDAR_ID || "").trim();
 const HUBSPOT_TOKEN = (process.env.HUBSPOT_ACCESS_TOKEN || "").trim();
+const RESEND_API_KEY = (process.env.RESEND_API_KEY || "").trim();
+
+// Sends a confirmation email to the caller after a successful booking.
+async function sendConfirmationEmail({ to, name, date, time, reason }) {
+  if (!RESEND_API_KEY) {
+    console.log("Skipping email: no RESEND_API_KEY set");
+    return;
+  }
+  if (!to) {
+    console.log("Skipping email: no caller email available");
+    return;
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      // Resend's free tier only lets you send from this address until you
+      // verify your own domain in Resend's Domains section.
+      from: "Apex Dental <onboarding@resend.dev>",
+      to,
+      subject: "Your appointment is confirmed - Apex Dental",
+      html: `
+        <p>Hi ${name || "there"},</p>
+        <p>Your appointment at Apex Dental is confirmed for <strong>${date} at ${time}</strong>.</p>
+        <p>Reason for visit: ${reason || "Not specified"}</p>
+        <p>If anything changes, our team will be in touch. See you soon!</p>
+        <p>- Apex Dental</p>
+      `,
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    console.error("Resend email error:", JSON.stringify(data));
+  } else {
+    console.log("Confirmation email sent:", data.id);
+  }
+}
 
 // Remembers the name/phone/reason collected during book_appointment for each call,
 // so the final end-of-call-report can use it (Vapi's structured-data output doesn't
@@ -322,6 +364,13 @@ app.post("/api/book-appointment", async (req, res) => {
 
     // DEBUG: log the created event link so we can verify it actually landed
     console.log("Event created:", created.data.htmlLink);
+
+    // Send a confirmation email (safe to fail without breaking the booking)
+    try {
+      await sendConfirmationEmail({ to: email, name, date, time, reason });
+    } catch (emailErr) {
+      console.error("Confirmation email failed:", emailErr);
+    }
 
     res.status(200).json({
       results: [
